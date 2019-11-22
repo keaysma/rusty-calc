@@ -2,6 +2,10 @@ use std::io::{self, Write};
 use std::collections::HashMap;
 use rand::Rng;
 
+extern crate rustyline;
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
+
 struct FunDef<'a>{
 	variables : &'a[String],
 	standard_values : &'a[f32],
@@ -73,38 +77,48 @@ const OPERATORS : &[&str] = &[
 fn main() {
 	let mut vars : HashMap<String, f32> = HashMap::new();
 	let mut funs : HashMap<String, FunDef> = HashMap::new();
-	let mut history = vec![];
 	let mut memory = Memory{ variables: vars, functions: funs };
     
 	println!("Michaelator v0");
 	print_rand_quote();
+		
+	let mut inline = Editor::<()>::new();
+	if inline.load_history("history.txt").is_err() {
+		println!("[No history found]");
+	}
+	
 	loop{
 		//Handle Input
-		let eq:String = take_input();
-		let eq = String::from(eq.trim());
-		//Interperate Input
-		let res : Response<f32> = parse_input(&eq, &mut memory);
-		//Handle History
-		history.extend_from_slice(&[res.value]);
-		//Handle Output
-		match res.status {
-			0x00 => {
-				println!("{}", res.value);
+		let input = inline.readline("> ");
+		match input {
+			Ok(x) => {
+				inline.add_history_entry(x.as_str());
+				let eq : String = String::from(x);
+				let res : Response<f32> = parse_input(&eq, &mut memory);
+				match res.status {
+					0x00 => {
+						println!("{}", res.value);
+					},
+					0x01 => println!("error"),
+					0x02 => println!("NaN"),
+					0x07 => continue,
+					0x08 => println!("ok"),
+					0xFF => {
+						break;
+					}
+					_ => {
+						println!("Unexpected status code encountered!");
+						break;
+					}
+				}
 			},
-			0x01 => println!("error"),
-			0x02 => println!("NaN"),
-			0x07 => continue,
-			0x08 => println!("ok"),
-			0xFF => {
-				break;
-			}
-			_ => {
-				println!("Unexpected status code encountered!");
-				break;
-			}
+			Err(ReadlineError::Interrupted) => continue,
+			Err(ReadlineError::Eof) => break,
+			Err(_) => break,
 		}
 	}
-	exit();
+	inline.save_history("history.txt").unwrap();
+	println!("Goodbye.");
 }
 
 fn take_input() -> String{
@@ -130,6 +144,7 @@ fn parse_input(input: &String, mem: &mut Memory) -> Response<f32>{
 
 	let res = parse_eq(input, mem);
 	if res.status == 0x00{
+		mem.variables.insert(String::from("_"), res.value);
 		return res;
 	}
 
@@ -428,8 +443,3 @@ fn print_rand_quote(){
 	let rand_int = rand::thread_rng().gen_range(0, 2);
 	println!("{}", QUOTES[rand_int]);
 }
-
-fn exit(){
-	println!("Goodbye.");
-}
-	
