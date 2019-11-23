@@ -120,19 +120,6 @@ fn main() {
 	inline.save_history("history.txt").unwrap();
 	println!("Goodbye.");
 }
-
-fn take_input() -> String{
-	print!(">");
-	//Guarantees output is written immediately
-	io::stdout().flush().expect("An unexpected error was encountered!");
-
-	let mut inp: String = String::new();
-	io::stdin().read_line(&mut inp)
-		.expect("I/O Error");
-	
-	inp
-}
-
 //This interperates the input in as many was as necessary to determine what it is
 //The status code here symbolizes that the input is of the correct type, or otherwise
 //The value can be, depending on the type, a value to return to the user, or a status code to return to the user
@@ -142,14 +129,15 @@ fn parse_input(input: &String, mem: &mut Memory) -> Response<f32>{
 		return Response::<f32>::err(0x07);
 	}
 
-	let res = parse_eq(input, mem);
+	//This check completes quickly, there isn't a good reason to have parse_eq attempt to handle this first since it takes much longer
+	let res = parse_def(input, mem);
 	if res.status == 0x00{
-		mem.variables.insert(String::from("_"), res.value);
 		return res;
 	}
 
-	let res = parse_def(input, mem);
+	let res = parse_eq(input, mem);
 	if res.status == 0x00{
+		mem.variables.insert(String::from("_"), res.value);
 		return res;
 	}
 
@@ -165,10 +153,9 @@ fn parse_input(input: &String, mem: &mut Memory) -> Response<f32>{
 fn parse_numeric(input: &String, mem: &mut Memory) -> Response<f32>{
 	let value : Response<f32> = match input.trim().parse() {
 		Ok(value) => {
-			Response::ok(value) //Response{ status: 0x00, value: value }
+			Response::ok(value)
 		},
 		Err(_) => {
-			//(0xFF, 0.0)
 			resolve_var(input, mem)
 		},
 	};
@@ -179,7 +166,7 @@ fn parse_numeric(input: &String, mem: &mut Memory) -> Response<f32>{
 fn resolve_var(input: &String, mem: &mut Memory) -> Response<f32>{
 	return match mem.variables.get(input) {
 		Some(x) => Response::ok(*x),
-		_ => Response{ status: 0xFF, value: 0.0 },
+		_ => Response::<f32>::reject(),
 	};
 }
 
@@ -187,11 +174,11 @@ fn parse_eq(input: &String, mem: &mut Memory) -> Response<f32>{
 	if !is_balanced_eq(input){
 		return Response::<f32>::err(0x01);
 	}
-	let objs : (u8, Vec<(u8, String)>) = find_clauses(input);
-	if objs.0 != 0x00 {
-		return Response{ status: objs.0, value: 0.0 };
+	let objs : Response<Vec<(u8, String)>> = find_clauses(input);
+	if objs.status != 0x00 {
+		return Response::<f32>::err(objs.status);
 	}
-	resolve_eq(&objs.1, mem)
+	resolve_eq(&objs.value, mem)
 }
 
 fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
@@ -200,7 +187,7 @@ fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 			0x00 => return parse_numeric(&input[0].1, mem),
 			0x01 => return parse_eq(&input[0].1, mem),
 			0x03 => return resolve_fn(&input[0].1, mem),
-			_ => return Response{ status: 0xFF, value: 0.0 },
+			_ => return Response::<f32>::reject(),
 		}
 	}
 	for op in OPERATORS{
@@ -246,7 +233,7 @@ fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 		}
 	}
 
-	Response{ status: 0xFF, value: 0.0 }
+	Response::<f32>::reject();
 }
 
 fn resolve_fn(input: &String, mem: &mut Memory) -> Response<f32>{
@@ -259,11 +246,8 @@ fn resolve_fn(input: &String, mem: &mut Memory) -> Response<f32>{
 }
 
 fn parse_def(input: &String, mem: &mut Memory) -> Response<f32>{
-	if !input.contains("="){
-		return Response::<f32>::reject();
-	}
 	let parts : Vec<&str> = input.split("=").collect();
-	if parts.len() > 2 {
+	if parts.len() != 2 {
 		return Response::<f32>::reject();
 	}
 	let var : Response<String> = parse_var(String::from(parts[0]));
@@ -340,7 +324,7 @@ fn is_balanced_eq(input: &String) -> bool{
 }
 
 //Returns an array of parenthetical statements, values, and mathemtical operators
-fn find_clauses(input: &String) -> (u8, Vec<(u8, String)>){
+fn find_clauses(input: &String) -> Response<Vec<(u8, String)>>{
 	let mut res = Vec::new();
 	let mut in_fn: bool = false;
 	let mut in_numeric : u8 = 0;
@@ -410,7 +394,7 @@ fn find_clauses(input: &String) -> (u8, Vec<(u8, String)>){
 		let seq = &input[start..i];
 		res.push((0x00, String::from(seq)));
 	}
-	(0x00, res)
+	Response::ok(res)
 }
 
 /*
@@ -443,3 +427,17 @@ fn print_rand_quote(){
 	let rand_int = rand::thread_rng().gen_range(0, 2);
 	println!("{}", QUOTES[rand_int]);
 }
+
+/*
+fn take_input() -> String{
+	print!(">");
+	//Guarantees output is written immediately
+	io::stdout().flush().expect("An unexpected error was encountered!");
+
+	let mut inp: String = String::new();
+	io::stdin().read_line(&mut inp)
+		.expect("I/O Error");
+	
+	inp
+}
+*/
