@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+//use std::io::{self, Write};
 use std::collections::HashMap;
 use rand::Rng;
 
@@ -65,13 +65,22 @@ const QUOTES:&[&str] = &[
 ];
 
 //This will parse equations, making necessary calls to parse_input to resolve special inputs
-const OPERATORS : &[&str] = &[
+const _OPERATORS : &[&str] = &[
 	"^", 
 	"*", 
 	"/",
 	"%", 
 	"+", 
 	"-"
+];
+
+const OPERATORS : &[&str] = &[
+	"-", 
+	"+", 
+	"%",
+	"/", 
+	"*", 
+	"^"
 ];
 
 fn main() {
@@ -119,18 +128,6 @@ fn main() {
 	}
 	inline.save_history("history.txt").unwrap();
 	println!("Goodbye.");
-}
-
-fn take_input() -> String{
-	print!(">");
-	//Guarantees output is written immediately
-	io::stdout().flush().expect("An unexpected error was encountered!");
-
-	let mut inp: String = String::new();
-	io::stdin().read_line(&mut inp)
-		.expect("I/O Error");
-	
-	inp
 }
 
 //This interperates the input in as many was as necessary to determine what it is
@@ -187,7 +184,7 @@ fn parse_eq(input: &String, mem: &mut Memory) -> Response<f32>{
 	if !is_balanced_eq(input){
 		return Response::<f32>::err(0x01);
 	}
-	let objs : (u8, Vec<(u8, String)>) = find_clauses(input);
+	let objs : (u8, Vec<(u8, String)>) = find_clauses_but_better(input);
 	if objs.0 != 0x00 {
 		return Response{ status: objs.0, value: 0.0 };
 	}
@@ -196,6 +193,9 @@ fn parse_eq(input: &String, mem: &mut Memory) -> Response<f32>{
 
 fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 	if input.len() == 1 {
+		//println!("[input type  = {}]", input[0].0);
+		//println!("[input value  = {}]", input[0].1);
+
 		match input[0].0 {
 			0x00 => return parse_numeric(&input[0].1, mem),
 			0x01 => return parse_eq(&input[0].1, mem),
@@ -204,7 +204,8 @@ fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 		}
 	}
 	for op in OPERATORS{
-		for (i, obj) in input.iter().enumerate(){
+		//println!("looking for {}", op);
+		for (i, obj) in input.iter().enumerate().rev(){
 			if obj.1 == *op{
 				let l = resolve_eq(&input[..i].to_vec(), mem);
 				if l.status != 0x00 {
@@ -214,6 +215,7 @@ fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 				if r.status != 0x00 {
 					return Response{ status: 0x04, value: 0.0 };
 				}
+				//println!("\n match on {}", op);
 				match op {
 					&"^" => {
 						let value: f32 = l.value.powf(r.value);
@@ -251,7 +253,7 @@ fn resolve_eq(input: &Vec<(u8, String)>, mem: &mut Memory) -> Response<f32>{
 
 fn resolve_fn(input: &String, mem: &mut Memory) -> Response<f32>{
 	return match mem.functions.get(input){
-		Some(x) => {
+		Some(_) => {
 			Response::ok(0.0)
 		},
 		_ => Response::<f32>::reject(),
@@ -339,103 +341,103 @@ fn is_balanced_eq(input: &String) -> bool{
 	true
 }
 
-//Returns an array of parenthetical statements, values, and mathemtical operators
-fn find_clauses(input: &String) -> (u8, Vec<(u8, String)>){
+fn find_clauses_but_better (input: &String) -> (u8, Vec<(u8, String)>) {
 	let mut res = Vec::new();
-	let mut in_fn: bool = false;
-	let mut in_numeric : u8 = 0;
-	let mut start = 0;
-	let mut lv = 0;
-	let mut i = 0;
-	for char in input.chars(){
+	let mut index = 0;
+	let mut level : i64 = -1;
+	let mut term_record : bool = false;
+	let mut term_start = 0;
+	let mut term_type = 0xFF;
+
+	for char in input.chars() {
 		match char {
 			'(' => {
-				if !in_fn{
-					in_fn = true;
-					lv = 0;
-					if in_numeric == 1 {
-						in_numeric = 2;
-					}else{
-						start = i;
+				if level == -1 {
+					if term_record == true {
+						let term = &input[term_start..index];
+						res.push((term_type, String::from(term)));
 					}
-				}else{
-					lv += 1;
+
+					term_record = true;
+					term_start = index;
+					term_type = 0x01;
 				}
+
+				level += 1;
 			},
 			')' => {
-				if lv == 0{
-					in_fn = false;
-					if in_numeric < 2{
-						let seq = &input[start+1..i];
-						res.push((0x01, String::from(seq)));
-					}else{
-						let seq = &input[start..i+1];
-						res.push((0x03, String::from(seq)));
-					}
-					in_numeric = 0;
-				}else{
-					lv -= 1;
+				level -= 1;
+
+				if level == -1 {
+					let term = &input[term_start+1..index];
+					res.push((term_type, String::from(term)));
+
+					term_record = false;
+					term_start = 0;
+					term_type = 0xFF;
 				}
 			},
 			_ => {
-				if !in_fn{
+				if level == -1 {
 					match char {
-						'^'|'*'|'/'|'%'|'+'|'-' => {
-							/*if i == 0 {
-								return (0x01, res);
-								//TODO check for if end of input
-							}*/
-							if in_numeric == 1 {
-								let seq = &input[start..i];
-								res.push((0x00, String::from(seq)));
-								in_numeric = 0;
-								start = 0;
+						'^'|'*'|'/'|'%'|'+' => {
+							if term_record {
+								let term = &input[term_start..index];
+								res.push((term_type, String::from(term)));
 							}
-							res.push((0x02, char.to_string()));
+							
+							let term = &input[index..index+1];
+							res.push((0x02, String::from(term)));
+
+							term_record = false;
+							term_start = 0;
+							term_type = 0x00;
+						},
+						'-' => {
+							if term_record == false {
+								//Numeric
+								term_record = true;
+								term_start = index;
+								term_type = 0x00;
+							}else{
+								//Equation
+								let term = &input[term_start..index];
+								res.push((term_type, String::from(term)));
+
+								let term = &input[index..index+1];
+								res.push((0x02, String::from(term)));
+
+								term_record = false;
+								term_start = 0;
+								term_type = 0xFF;
+							}
 						},
 						_ => {
-							if in_numeric == 0 {
-								in_numeric = 1;
-								start = i;
+							if term_record == false {
+								term_record = true;
+								term_start = index;
+								term_type = 0x00;
 							}
-						},
-						//_ => return (0x01, res),
+						}
 					}
 				}
-			},
+			}
 		}
-		i += 1;
+
+		index += 1;
 	}
-	if in_numeric == 1 {
-		let seq = &input[start..i];
-		res.push((0x00, String::from(seq)));
+
+	if term_record == true {
+		let term = &input[term_start..index];
+		res.push((term_type, String::from(term)));
+
+		//term_record = false;
+		//term_start = 0;
+		//term_type = 0x00;
 	}
+
 	(0x00, res)
 }
-
-/*
-fn simple_add(){
-	let mut acc:i32 = 0;
-	for token in inp.trim().split("+"){
-		let parsed:i32 = token.parse().expect("NaN");
-		acc += parsed;
-	}
-	println!("{}", acc);
-}
-*/
-
-/*
-let parsed: u32 = inp.trim().parse().expect("Syntax Error!");
-fn get_number(String inp){
-	let parsed: u32 = match inp.trim().parse() {
-		Ok(x) => x, 
-		Err(_) => {
-			println!("NaN");
-			0
-		},
-	};
-}
-*/
 
 fn print_rand_quote(){
 	//let quotes = List::new();
